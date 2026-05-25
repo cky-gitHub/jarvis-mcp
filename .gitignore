@@ -29,3 +29,6 @@ jarvismcp-env/
 
 # Logs
 *.log
+
+# Claude
+.claude/
