@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\Constantin\\\\AppData\\\\Roaming\\\\Claude\\\\\" -Force -ErrorAction SilentlyContinue)",
+      "Read(//c/Program Files/**)",
+      "PowerShell(findstr /i claude)",
+      "PowerShell(Get-ChildItem \"$env:USERPROFILE\\\\.clauderc\" -Force -ErrorAction SilentlyContinue | Get-Content)",
+      "PowerShell(& \"C:\\\\Users\\\\Constantin\\\\Coding\\\\jarvis-mcp\\\\jarvismcp-env\\\\Scripts\\\\python.exe\" -m pip list)",
+      "PowerShell(& \"C:\\\\Users\\\\Constantin\\\\Coding\\\\jarvis-mcp\\\\jarvismcp-env\\\\Scripts\\\\python.exe\" -c \"import sys; print\\(sys.executable\\)\")"
+    ]
+  }
+}
