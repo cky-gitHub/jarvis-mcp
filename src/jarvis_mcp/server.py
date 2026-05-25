@@ -8,6 +8,7 @@ Claude Desktop before any tools exist.
 import pyperclip
 from fastmcp import FastMCP
 import subprocess
+import pyautogui
 
 
 mcp: FastMCP = FastMCP("jarvis-mcp")
@@ -51,7 +52,6 @@ def open_app(name: str) -> str:
     subprocess.Popen(["cmd", "/c", "start", "", name], shell=False)
     return f"Issued launch command for: {name}"
 
-import pyautogui
 
 @mcp.tool
 def type_text(text: str) -> str:
@@ -79,6 +79,53 @@ def type_text(text: str) -> str:
 
     pyautogui.typewrite(text, interval=0.01)
     return f"Issued typing command for: {text}"
+
+@mcp.tool
+def control_music(action: str, query: str | None = None) -> str:
+    """Control music playback using Windows global media keys.
+
+        Sends keyboard media-key events that any compliant media player on
+        Windows will respond to, including Spotify. The target app does not
+        need to be focused — media keys work globally. The app does need to
+        be running for play/pause/skip/previous to have any effect.
+
+        `search_and_play` is declared but not yet implemented in this MVP.
+        Calling it returns an explanatory message instead of failing.
+
+        Parameters
+        ----------
+        action : str
+            One of: "play", "pause", "skip", "previous", "search_and_play".
+            Note that "play" and "pause" both send the same toggle key, since
+            Windows media controls expose a single play/pause toggle rather
+            than separate commands.
+        query : str | None
+            Search query, used only by "search_and_play". Ignored for all
+            other actions. Defaults to None.
+
+        Returns
+        -------
+        str
+        Confirmation of the action taken, or an error message describing
+        why the action could not be performed.
+    """
+    if action in ("play", "pause"):
+        pyautogui.press("playpause")
+        return "Toggled play/pause"
+    elif action == "skip":
+        pyautogui.press("nexttrack")
+        return "Skipped to next track"
+    elif action == "previous":
+        pyautogui.press("prevtrack")
+        return "Went to previous track"
+    elif action == "search_and_play":
+        return "search_and_play is not yet implemented in this MVP"
+    else:
+        return (
+            f"Unknown action: {action!r}. "
+            "Valid actions: play, pause, skip, previous, search_and_play."
+        )
+
 
 def main() -> None:
     """Entry point for the `jarvis-mcp` console script."""
