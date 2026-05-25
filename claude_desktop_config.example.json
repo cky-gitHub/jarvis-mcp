@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "jarvis": {
+      "command": "jarvis-mcp"
+    }
+  }
+}
