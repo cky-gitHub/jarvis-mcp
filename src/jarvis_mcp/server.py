@@ -9,6 +9,16 @@ import pyperclip
 from fastmcp import FastMCP
 import subprocess
 import pyautogui
+from io import BytesIO
+import pyautogui
+from fastmcp.utilities.types import Image
+import asyncio
+import tempfile
+import os
+import edge_tts
+from playsound3 import playsound
+
+
 
 
 mcp: FastMCP = FastMCP("jarvis-mcp")
@@ -125,6 +135,76 @@ def control_music(action: str, query: str | None = None) -> str:
             f"Unknown action: {action!r}. "
             "Valid actions: play, pause, skip, previous, search_and_play."
         )
+
+
+@mcp.tool
+def screenshot() -> Image:
+    """Capture the primary monitor and return it as a PNG image.
+
+    Use this when you need to see what's currently on the user's screen — 
+    to verify a window opened, read text that isn't on the clipboard, 
+    locate UI elements before clicking, or confirm the result of a 
+    previous action.
+
+    Captures the full primary display only. Multi-monitor setups will not
+    capture secondary screens. There is no region selection yet; you get
+    the entire screen every time.
+
+    Returns
+    -------
+    Image
+        A PNG screenshot of the primary monitor.
+    """
+    img = pyautogui.screenshot()
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return Image(data=buf.getvalue(), format="png")
+
+
+@mcp.tool
+def speak(text: str, voice: str = "en-US-GuyNeural") -> str:
+    """Speak text aloud through the system's default audio output.
+
+        Only call this tool when the user has explicitly asked for a spoken
+        response in the current message, or has established earlier in the
+        conversation that they want spoken replies. Do NOT call this tool by
+        default, do NOT call it to "announce" or "confirm" actions, and do NOT
+        call it just because the response is short. When in doubt, do not speak.
+
+        Uses Microsoft Edge's neural TTS voices (requires internet). Blocks
+        until speech finishes. Speech cannot be interrupted once started — keep
+        `text` short (one or two sentences) unless the user has asked for a
+        longer spoken response.
+
+        Parameters
+        ----------
+        text : str
+            The text to speak aloud.
+        voice : str
+            Edge TTS voice ID. Defaults to "en-US-GuyNeural" (male, American).
+            Other good options: "en-US-AriaNeural" (female, American),
+            "en-GB-RyanNeural" (male, British), "en-US-JennyNeural" (female,
+            American, conversational).
+
+        Returns
+        -------
+        str
+        Confirmation that speech completed.
+    """
+    async def _generate(path: str) -> None:
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(path)
+
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        path = f.name
+
+    try:
+        asyncio.run(_generate(path))
+        playsound(path)
+    finally:
+        os.unlink(path)
+
+    return f"Spoke: {text}"
 
 
 def main() -> None:

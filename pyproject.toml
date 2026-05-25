@@ -22,6 +22,8 @@ dependencies = [
     "pyautogui>=0.9.54",
     "pyperclip>=1.8.2",
     "pywinauto>=0.6.8",
+    "Pillow",
+    "pyscreeze",
 ]
 
 [project.urls]
