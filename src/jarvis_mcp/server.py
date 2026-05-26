@@ -238,6 +238,47 @@ def speak(text: str, voice: str = "en-US-GuyNeural") -> str:
     return f"Spoke: {text}"
 
 
+@mcp.tool
+def click(x: float, y: float, button: str = "left", double: bool = False) -> str:
+    """Click at a position on the primary monitor.
+
+    Coordinates are FRACTIONAL, not pixels — `x` and `y` must be between
+    0.0 and 1.0, representing position as a fraction of screen width and
+    height. This makes the tool resolution-independent: a click at
+    (0.5, 0.5) is always the center of the screen regardless of monitor
+    size or screenshot downscaling.
+
+    When using this with `screenshot()`: estimate the target's position as
+    a fraction of the screenshot's dimensions and pass those fractions
+    directly. Do not convert to screenshot pixels first.
+
+    Parameters
+    ----------
+    x : float
+        Horizontal position, 0.0 (left edge) to 1.0 (right edge).
+    y : float
+        Vertical position, 0.0 (top edge) to 1.0 (bottom edge).
+    button : str
+        "left", "right", or "middle". Defaults to "left".
+    double : bool
+        If True, perform a double-click. Defaults to False.
+
+    Returns
+    -------
+    str
+        Confirmation of the click action, including the resolved pixel
+        coordinates.
+    """
+    if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+        return f"Invalid coordinates: x={x}, y={y}. Both must be between 0.0 and 1.0."
+
+    screen_w, screen_h = pyautogui.size()
+    px = int(x * screen_w)
+    py = int(y * screen_h)
+
+    clicks = 2 if double else 1
+    pyautogui.click(x=px, y=py, clicks=clicks, button=button)
+    return f"Clicked {button} at ({px}, {py}) [{x:.3f}, {y:.3f}]"
 
 
 def main() -> None:
