@@ -24,6 +24,8 @@ dependencies = [
     "pywinauto>=0.6.8",
     "Pillow",
     "pyscreeze",
+    "edge-tts",
+    "playsound3",
 ]
 
 [project.urls]

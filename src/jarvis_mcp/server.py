@@ -10,7 +10,6 @@ from fastmcp import FastMCP
 import subprocess
 import pyautogui
 from io import BytesIO
-import pyautogui
 from fastmcp.utilities.types import Image
 import asyncio
 import tempfile
@@ -36,6 +35,26 @@ def read_clipboard() -> str:
     """
     return pyperclip.paste()
 
+@mcp.tool
+def write_clipboard(text: str) -> str:
+    """Write text to the system clipboard, replacing current contents.
+
+    Use this when the user wants text made available for pasting elsewhere,
+    or when returning a large block of text that would be tedious to copy
+    from the chat. Overwrites whatever is currently on the clipboard.
+
+    Parameters
+    ----------
+    text : str
+        The text to place on the clipboard.
+
+    Returns
+    -------
+    str
+        Confirmation that the clipboard was updated.
+    """
+    pyperclip.copy(text)
+    return f"Wrote {len(text)} chars to clipboard"
 
 @mcp.tool
 def open_app(name: str) -> str:
