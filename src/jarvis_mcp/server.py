@@ -157,26 +157,38 @@ def control_music(action: str, query: str | None = None) -> str:
 
 
 @mcp.tool
-def screenshot() -> Image:
+def screenshot(max_dimension: int = 1568) -> Image:
     """Capture the primary monitor and return it as a PNG image.
 
-    Use this when you need to see what's currently on the user's screen — 
-    to verify a window opened, read text that isn't on the clipboard, 
-    locate UI elements before clicking, or confirm the result of a 
-    previous action.
+        Use this when you need to see what's currently on the user's screen — 
+        to verify a window opened, read text that isn't on the clipboard, 
+        locate UI elements before clicking, or confirm the result of a 
+        previous action.
 
-    Captures the full primary display only. Multi-monitor setups will not
-    capture secondary screens. There is no region selection yet; you get
-    the entire screen every time.
+        The image is downscaled so its longest side does not exceed
+        `max_dimension` pixels, to stay within tool-output size limits and
+        keep token cost reasonable. Coordinates returned by vision are in
+        the DOWNSCALED image space — multiply by the scale factor before
+        passing to `click()`. The scale factor is (original / max_dimension).
 
-    Returns
-    -------
-    Image
-        A PNG screenshot of the primary monitor.
+        Captures the full primary display only. Multi-monitor setups will not
+        capture secondary screens.
+
+        Parameters
+        ----------
+        max_dimension : int
+            Maximum length of the longest side in pixels. Defaults to 1568,
+            which matches Anthropic's recommended image size for vision tasks.
+
+        Returns
+        -------
+        Image
+        A downscaled PNG screenshot of the primary monitor.
     """
     img = pyautogui.screenshot()
+    img.thumbnail((max_dimension, max_dimension))
     buf = BytesIO()
-    img.save(buf, format="PNG")
+    img.save(buf, format="PNG", optimize=True)
     return Image(data=buf.getvalue(), format="png")
 
 
@@ -224,6 +236,8 @@ def speak(text: str, voice: str = "en-US-GuyNeural") -> str:
         os.unlink(path)
 
     return f"Spoke: {text}"
+
+
 
 
 def main() -> None:
