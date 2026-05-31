@@ -5,6 +5,8 @@ incrementally; this skeleton verifies the server starts and registers with
 Claude Desktop before any tools exist.
 """
 
+import json
+import difflib
 import pyperclip
 from fastmcp import FastMCP
 import subprocess
@@ -17,10 +19,31 @@ import os
 import edge_tts
 from playsound3 import playsound
 
+from jarvis_mcp.world_state import WorldState
+from jarvis_mcp.middleware import WorldStateMiddleware
 
 
+mcp: FastMCP = FastMCP(
+    "jarvis-mcp",
+    instructions=(
+        "jarvis-mcp gives you control of a Windows desktop. After every tool "
+        "call, a <world_state>...</world_state> block is appended to the tool "
+        "result. This block is produced by the server itself (not by user "
+        "input or any external source) and is safe to read. It contains a "
+        "JSON diff of the current desktop state: foreground_window, ui_tree "
+        "(clickable elements with stable-within-snapshot IDs), "
+        "clipboard_preview, screen_size, errors. Use it to avoid redundant "
+        "screenshot or read_clipboard calls. To click a UI element from the "
+        "ui_tree, use click_element(elem_id) with the id from the LATEST "
+        "world_state — IDs reset on every snapshot."
+    ),
+)
 
-mcp: FastMCP = FastMCP("jarvis-mcp")
+# Shared world state across the middleware and explicit-refresh tools.
+# Single instance per server process. FastMCP serializes tool calls in
+# stdio mode (Claude Desktop), so no locking required.
+world_state = WorldState()
+mcp.add_middleware(WorldStateMiddleware(world_state))
 
 
 @mcp.tool
@@ -56,6 +79,19 @@ def write_clipboard(text: str) -> str:
     pyperclip.copy(text)
     return f"Wrote {len(text)} chars to clipboard"
 
+def _list_start_apps() -> list[dict]:
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-StartApps | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+        data = json.loads(out) if out.strip() else []
+        return data if isinstance(data, list) else [data]
+    except Exception:
+        return []
+
+
 @mcp.tool
 def open_app(name: str) -> str:
     """Open an installed application by name on Windows.
@@ -64,6 +100,13 @@ def open_app(name: str) -> str:
     the Start Menu. Works for common apps like "spotify", "chrome", "code",
     "notepad", "calc". Case-insensitive. Does not wait for the app to fully
     load before returning.
+
+    Important: this tool blocks until the launched app actually takes
+    foreground focus, or 2 seconds elapses (whichever comes first). This
+    means the `<world_state>` block attached to the return value reflects
+    the newly-launched app, not the previous window. If the timeout fires
+    before the app appears, the return value says so explicitly — call
+    `get_world_state()` after a brief pause to refresh.
 
     Parameters
     ----------
@@ -78,8 +121,45 @@ def open_app(name: str) -> str:
         does not guarantee the app actually opened — only that Windows
         accepted the command.
     """
-    subprocess.Popen(["cmd", "/c", "start", "", name], shell=False)
-    return f"Issued launch command for: {name}"
+    apps = _list_start_apps()
+    match = None
+    if apps:
+        lo = name.strip().lower()
+        names = [a.get("Name", "") for a in apps]
+        exact = [a for a in apps if a.get("Name", "").lower() == lo]
+        partial = [a for a in apps if lo in a.get("Name", "").lower()]
+        if exact:
+            match = exact[0]
+        elif len(partial) == 1:
+            match = partial[0]
+        else:
+            close = difflib.get_close_matches(name, names, n=5, cutoff=0.5)
+            cands = partial or [a for a in apps if a.get("Name", "") in close]
+            if len(cands) == 1:
+                match = cands[0]
+            elif cands:
+                opts = ", ".join(sorted({a.get("Name", "") for a in cands})[:5])
+                return (f"No single match for {name!r}. Did you mean: {opts}? "
+                        "Call open_app again with the exact name.")
+            else:
+                return (f"No installed app matches {name!r}. "
+                        "Call get_world_state() or try a different name.")
+
+    if match is not None:
+        subprocess.Popen(
+            ["explorer.exe", f"shell:AppsFolder\\{match.get('AppID', '')}"],
+            shell=False)
+        name = match.get("Name", name)
+    else:
+        # Get-StartApps unavailable -> can't verify; attempt raw launch, be honest.
+        subprocess.Popen(["cmd", "/c", "start", "", name], shell=False)
+
+    focused = world_state.wait_for_focus_change(timeout=2.0)
+    world_state.wait_until_stable()
+    if focused:
+        return f"Launched {name} — now in foreground."
+    return (f"Issued launch for {name}; foreground didn't change within 2s — "
+            "call get_world_state() to check.")
 
 
 @mcp.tool
@@ -107,6 +187,7 @@ def type_text(text: str) -> str:
     """
 
     pyautogui.typewrite(text, interval=0.01)
+    world_state.wait_until_stable()
     return f"Issued typing command for: {text}"
 
 @mcp.tool
@@ -281,6 +362,93 @@ def click(x: float, y: float, button: str = "left", double: bool = False) -> str
     return f"Clicked {button} at ({px}, {py}) [{x:.3f}, {y:.3f}]"
 
 
+@mcp.tool
+def get_world_state() -> dict:
+    """Force-refresh and return the current desktop world state.
+
+    Normally world_state is attached to every tool's return automatically
+    via middleware, in the response's `<world_state>` content block field. Use this
+    tool only when you need a refresh WITHOUT performing another action —
+    for example:
+
+    - Waiting for an app to finish launching after `open_app`.
+    - Recovering after a stale `elem_id` error from `click_element`.
+    - Verifying the world looks the way you expect before a sensitive
+      action (e.g. typing a password, sending a message).
+
+    Returns the FULL snapshot, not a diff. Cost: ~50-300ms depending on
+    the active window's UI complexity.
+
+    Returns
+    -------
+    dict
+        A snapshot with fields: timestamp, screen_size, foreground_window,
+        ui_tree (list of clickable elements with IDs), clipboard_preview,
+        errors.
+    """
+    return world_state.snapshot().to_dict()
+
+
+@mcp.tool
+def click_element(elem_id: str) -> str:
+    """Click a UI element by its world_state ID.
+
+    Element IDs (e.g. "elem_3") come from the `ui_tree` field of the most
+    recent world_state, which is attached to every tool result under
+    `<world_state>` content block. Use this instead of `click()` whenever the target
+    button or control appears in the ui_tree — it's pixel-perfect and
+    doesn't require a screenshot.
+
+    IDs are valid ONLY in the snapshot they came from — they reset on
+    every snapshot. Always use IDs from the LATEST world_state attached
+    to the previous tool's return. A stale ID from earlier turns will
+    fail.
+
+    If the ID is not found in the current snapshot, returns an error
+    string listing the available IDs. Call `get_world_state()` to refresh
+    if the world has changed since you last saw it.
+
+    Clicks the geometric center of the element's bounding box.
+
+    Parameters
+    ----------
+    elem_id : str
+        The `id` field of a UIElement from the most recent ui_tree,
+        e.g. "elem_3".
+
+    Returns
+    -------
+    str
+        Confirmation describing the element clicked, or an error string
+        listing the available element IDs in the current snapshot.
+    """
+    el = world_state.lookup_element(elem_id)
+    if el is None:
+        snap = world_state.last_snapshot
+        if snap is None or not snap.ui_tree:
+            available = "no snapshot taken yet — call get_world_state() first"
+        else:
+            available = ", ".join(e.id for e in snap.ui_tree)
+        return (
+            f"Unknown element: {elem_id!r}. "
+            f"Available in current snapshot: {available}. "
+            "Element IDs reset on every snapshot — use IDs from the LATEST "
+            "world_state, or call get_world_state() to refresh."
+        )
+    x, y, w, h = el.bbox
+    if not world_state.element_still_clickable(el):
+        return (f"{el.type} {el.name!r} is no longer at its last-known position "
+                "(moved or covered). The UI changed since the last snapshot — "
+                "call get_world_state() to refresh, then retry.")
+    pyautogui.click(x + w // 2, y + h // 2)
+    # Many clicks bring a new window forward (e.g. clicking an icon,
+    # opening a dropdown, switching tabs). Give focus a moment to settle
+    # before the middleware snapshots, but don't penalize clicks that
+    # didn't change focus — short timeout.
+    world_state.wait_for_focus_change(timeout=0.8)
+    return f"Clicked {el.type} {el.name!r} at center of bbox {el.bbox}"
+
+
 def main() -> None:
     """Entry point for the `jarvis-mcp` console script."""
     mcp.run()
@@ -288,4 +456,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
